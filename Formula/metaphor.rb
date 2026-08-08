@@ -1,8 +1,8 @@
 class Metaphor < Formula
   desc "Command-line tools for the metaphor Swift + Metal creative coding library"
   homepage "https://github.com/shinyaoguri/metaphor-cli"
-  url "https://github.com/shinyaoguri/metaphor-cli/releases/download/v0.5.3/metaphor-cli_v0.5.3_source.tar.gz"
-  sha256 "c2fb1bf2d86a064dc928e3be4a370779143a2f3248b2fd4e3bf92bd73e549540"
+  url "https://github.com/shinyaoguri/metaphor-cli/releases/download/v0.6.0/metaphor-cli_v0.6.0_source.tar.gz"
+  sha256 "92ba9a3717031f82e2a6fc967a582450bc433f706691bf0f195229251ff18662"
   license "MIT"
   head "https://github.com/shinyaoguri/metaphor-cli.git", branch: "main"
 

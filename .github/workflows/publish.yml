@@ -1,42 +1,140 @@
 name: brew pr-pull
 
+# Formula 更新 PR を、bottle 込みで main へ取り込む。
+#
+# 起点は `pr-pull` ラベルではなく brew test-bot の成功。この tap の Formula 更新は
+# metaphor-cli のリリースワークフローが自動で PR にして投げてくるもので、そこに
+# 人がラベルを貼りに来る運用は結局「誰かが気付くまで止まる」段をひとつ増やすだけ
+# だった（tap への直 push をやめて PR にしたのは、実ビルド検証を挟むためであって
+# 承認を挟むためではない）。テストが緑になった PR は、そのまま bottle を引き取って
+# main に入る。
+#
+# bottle の置き場は GitHub Packages (ghcr.io/<owner>/tap)。パッケージは初回だけ
+# private で作られるので、一度だけ public に変える必要がある — 手順は
+# metaphor-cli の docs/homebrew.md を参照。
 on:
-  pull_request_target:
-    types:
-      - labeled
+  workflow_run:
+    workflows: ["brew test-bot"]
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: write
+  packages: write
+  pull-requests: write
+
+concurrency:
+  group: pr-pull
+  cancel-in-progress: false
 
 jobs:
   pr-pull:
-    if: contains(github.event.pull_request.labels.*.name, 'pr-pull')
+    # fork からの PR は除外する: workflow_run は base リポジトリの権限で走るので、
+    # 素性の知れない artifact をそのまま main へ流し込む口になりうる。
+    if: >
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-latest
-    permissions:
-      actions: read
-      checks: read
-      contents: write
-      issues: read
-      pull-requests: write
     steps:
+      - name: Resolve the pull request
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          NUMBER=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${HEAD_SHA}/pulls" \
+            --jq '.[0].number // empty')
+          if [ -z "$NUMBER" ]; then
+            echo "::notice::${HEAD_SHA} に紐づく PR がないため何もしません。"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Formula 以外に触る PR（ワークフローの変更など）は自動で取り込まない。
+          # brew pr-pull は Formula の bottle DSL を書き換える道具であって、
+          # 一般の PR をマージする道具ではない。
+          OFFENDING=$(gh pr view "$NUMBER" --repo "$GITHUB_REPOSITORY" \
+            --json files --jq '.files[].path' | grep -cv '^Formula/' || true)
+          if [ "$OFFENDING" -ne 0 ]; then
+            echo "::notice::PR #${NUMBER} は Formula 以外を変更しているため、自動取り込みの対象外です。"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "number=$NUMBER" >> "$GITHUB_OUTPUT"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "対象: PR #${NUMBER}"
+
       - name: Set up Homebrew
+        if: steps.pr.outputs.skip == 'false'
         uses: Homebrew/actions/setup-homebrew@main
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up git
+        if: steps.pr.outputs.skip == 'false'
         uses: Homebrew/actions/git-user-config@main
 
+      # 失敗しても後続でフォールバックするので continue-on-error。bottle は
+      # あくまで「ソースビルドの待ち時間を消す」最適化で、これが取れないことは
+      # 配布を止める理由にならない。
       - name: Pull bottles
+        id: pr-pull
+        if: steps.pr.outputs.skip == 'false'
+        continue-on-error: true
         env:
           HOMEBREW_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PULL_REQUEST: ${{ github.event.pull_request.number }}
-        run: brew pr-pull --debug --tap="$GITHUB_REPOSITORY" "$PULL_REQUEST"
+          HOMEBREW_GITHUB_PACKAGES_USER: ${{ github.repository_owner }}
+          HOMEBREW_GITHUB_PACKAGES_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PULL_REQUEST: ${{ steps.pr.outputs.number }}
+        run: |
+          brew pr-pull \
+            --debug \
+            --tap="$GITHUB_REPOSITORY" \
+            --root-url="https://ghcr.io/v2/${GITHUB_REPOSITORY_OWNER}/tap" \
+            "$PULL_REQUEST"
 
       - name: Push commits
+        if: steps.pr.outputs.skip == 'false' && steps.pr-pull.outcome == 'success'
         uses: Homebrew/actions/git-try-push@main
         with:
           branch: main
 
       - name: Delete branch
-        if: github.event.pull_request.head.repo.fork == false
+        if: steps.pr.outputs.skip == 'false' && steps.pr-pull.outcome == 'success'
         env:
-          BRANCH: ${{ github.event.pull_request.head.ref }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
         run: git push --delete origin "$BRANCH"
+
+      # bottle を引き取れなかったとき: Formula 自体は正しくビルド・テストを通って
+      # いる（それが workflow_run の前提）ので、bottle 抜きで普通に merge する。
+      # ここで止めると brew 側が古い版のまま取り残され、bottle が無いより悪い。
+      - name: Merge without bottles
+        id: fallback
+        if: steps.pr.outputs.skip == 'false' && steps.pr-pull.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+        run: |
+          set -euo pipefail
+          echo "::warning::bottle を取り込めませんでした。bottle 無しで Formula だけ merge します（brew install はソースビルドになります）。"
+          # cwd は setup-homebrew が用意した tap のクローンなので、gh の対象は明示する。
+          gh pr merge "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --squash --delete-branch
+          {
+            echo "### bottle なしで取り込みました"
+            echo
+            echo "PR #${PR_NUMBER} の Formula は main に入りましたが、bottle の"
+            echo "取り込み (\`brew pr-pull\`) に失敗しています。"
+            echo "\`brew install\` は当面ソースビルドになります。"
+            echo
+            echo "よくある原因: ghcr.io のパッケージがまだ private / \`packages: write\` の不足 /"
+            echo "brew test-bot が bottle artifact を残していない。"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # 配布は上で通してあるが、bottle が落ちた事実は赤で残す。緑にすると
+      # 「ソースビルドのままずっと気付かない」に戻る。
+      - name: Fail the run after a bottle-less merge
+        if: steps.fallback.outcome == 'success'
+        run: exit 1

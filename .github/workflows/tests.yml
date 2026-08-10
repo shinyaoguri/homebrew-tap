@@ -9,13 +9,16 @@ on:
 jobs:
   test-bot:
     strategy:
+      # 1 つの macOS 版で落ちても、他の版の bottle は作り切って原因を並べたい。
+      fail-fast: false
       matrix:
-        os: [ macos-15-intel, macos-26 ]
-        include:
-          - os: ubuntu-latest
-            container: ghcr.io/homebrew/brew:main
+        # metaphor.rb は `depends_on macos: :sonoma` かつ Syphon.framework が
+        # arm64 のみ。Intel や Linux のランナーでは依存を満たさず --only-formulae
+        # が Formula ごとスキップされる（= 実ビルドの検証が一度も走らない）ので、
+        # arm64 macOS だけを並べる。ここに並べた版がそのまま bottle の対象になる:
+        #   macos-14 = sonoma / macos-15 = sequoia / macos-26 = tahoe
+        os: [macos-14, macos-15, macos-26]
     runs-on: ${{ matrix.os }}
-    container: ${{ matrix.container }}
     permissions:
       actions: read
       checks: read
@@ -40,9 +43,15 @@ jobs:
       - run: brew test-bot --only-setup
 
       - run: brew test-bot --only-tap-syntax
+
+      # PR でだけ実ビルド + `brew test` + bottle 生成まで走る。metaphor-cli の
+      # リリースが出す Formula 更新 PR は、ここが green でなければ main に入らない
+      # （publish.yml が workflow_run でこのワークフローの成功を待つ）。
       - run: brew test-bot --only-formulae
         if: github.event_name == 'pull_request'
 
+      # publish.yml の `brew pr-pull` がこの artifact を回収して Formula に
+      # bottle DSL を書き込む。artifact 名の既定パターンは `bottles{,_*}`。
       - name: Upload bottles as artifact
         if: always() && github.event_name == 'pull_request'
         uses: actions/upload-artifact@v4

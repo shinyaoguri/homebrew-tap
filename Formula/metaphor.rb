@@ -1,17 +1,10 @@
 class Metaphor < Formula
   desc "Command-line tools for the metaphor Swift + Metal creative coding library"
   homepage "https://github.com/shinyaoguri/metaphor-cli"
-  url "https://github.com/shinyaoguri/metaphor-cli/releases/download/v0.10.2/metaphor-cli_v0.10.2_source.tar.gz"
-  sha256 "c592904f0844fb2f825e07f5941b01500dfa0c0479e988cd2d675c9f2eb70182"
+  url "https://github.com/shinyaoguri/metaphor-cli/releases/download/v0.10.3/metaphor-cli_v0.10.3_source.tar.gz"
+  sha256 "0a3ae35557c05a3266631c4f92c48c634913223e522a7541cda4d1daa8adaf4f"
   license "MIT"
   head "https://github.com/shinyaoguri/metaphor-cli.git", branch: "main"
-
-  bottle do
-    root_url "https://github.com/shinyaoguri/homebrew-tap/releases/download/metaphor-0.10.2"
-    sha256 arm64_tahoe:   "e01b827c0b3aa583698d97328794bac563c0d5f792e33b01ab1bbbd833921dd7"
-    sha256 arm64_sequoia: "6611115f5d3c894705d27fa25a11e245df606962fda97b74aa60ffdc338fd4ee"
-    sha256 arm64_sonoma:  "ecd404cd8c86e72a81db2b26ab17d819c0a50e87b5fb843c6ec131c946087d89"
-  end
 
   depends_on xcode: ["15.0", :build]
   depends_on macos: :sonoma

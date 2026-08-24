@@ -6,6 +6,13 @@ class Metaphor < Formula
   license "MIT"
   head "https://github.com/shinyaoguri/metaphor-cli.git", branch: "main"
 
+  bottle do
+    root_url "https://github.com/shinyaoguri/homebrew-tap/releases/download/metaphor-0.23.2"
+    sha256 arm64_tahoe:   "629bac6319ddb6fd26731e7fb6ef1dc5a9bb9d9201f4494a5e62704b3f94b4de"
+    sha256 arm64_sequoia: "2c3eb59e17cf917a72db7f81399a6782d4d04e6e4a1eb6f2cc1f3994a065db7a"
+    sha256 arm64_sonoma:  "ca69683c903bacf1a3c403373e4c3a21c9dc05d032b5ab18c88c99188e941db7"
+  end
+
   depends_on xcode: ["15.0", :build]
   depends_on macos: :sonoma
 
